@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deepfake Face Swap - Video</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-card: #161b22;
+            --bg-input: #21262d;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --accent-hover: #79b8ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #58a6ff, #a371f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-title::before {
+            content: '';
+            width: 4px;
+            height: 1rem;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        .step-badge {
+            display: inline-block;
+            background: var(--bg-input);
+            color: var(--text-muted);
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .step-badge.done {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--success);
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            padding: 0.6rem 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .radio-option:hover {
+            border-color: var(--accent);
+        }
+
+        .radio-option input {
+            accent-color: var(--accent);
+        }
+
+        .radio-option input:checked + span {
+            color: var(--accent);
+        }
+
+        .btn {
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 500;
+            padding: 0.65rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-input);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .upload-zone {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 2rem;
+            text-align: center;
+            background: var(--bg-input);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--accent);
+            background: rgba(88, 166, 255, 0.05);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(88, 166, 255, 0.1);
+        }
+
+        .upload-zone input {
+            display: none;
+        }
+
+        .upload-zone .icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            opacity: 0.7;
+        }
+
+        .upload-zone .hint {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .upload-zone .file-name {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--accent);
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 600px) {
+            .upload-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-input);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #a371f7);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .message {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .message.success {
+            background: rgba(63, 185, 80, 0.15);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+            color: var(--success);
+        }
+
+        .message.error {
+            background: rgba(248, 81, 73, 0.15);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            color: var(--error);
+        }
+
+        .message.info {
+            background: rgba(88, 166, 255, 0.1);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+            color: var(--accent);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .mt-1 { margin-top: 1rem; }
+        .mt-2 { margin-top: 1.5rem; }
+
+        .download-section {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Deepfake Face Swap</h1>
+            <p class="subtitle">Ganti wajah di video dengan wajah dari gambar menggunakan InsightFace</p>
+        </header>
+
+        <!-- Step 1: Device & Load Model -->
+        <div class="card">
+            <div class="card-title">
+                <span class="step-badge" id="step1-badge">Step 1</span>
+                Pilih Device & Load Model
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+                Pilih CPU atau GPU, lalu load model sebelum upload file.
+            </p>
+            <div class="radio-group">
+                <label class="radio-option">
+                    <input type="radio" name="device" value="cpu" checked>
+                    <span>CPU</span>
+                </label>
+                <label class="radio-option" id="gpu-option">
+                    <input type="radio" name="device" value="gpu">
+                    <span>GPU (CUDA)</span>
+                </label>
+            </div>
+            <div class="mt-1">
+                <button class="btn btn-primary" id="btn-load-model">
+                    Load Model
+                </button>
+                <span id="model-status" class="message info hidden" style="display: inline-block; margin-left: 1rem;"></span>
+            </div>
+        </div>
+
+        <!-- Step 2: Upload & Process -->
+        <div class="card" id="upload-card">
+            <div class="card-title">
+                <span class="step-badge" id="step2-badge">Step 2</span>
+                Upload Video & Gambar Wajah
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+                Upload 1 video (wajah yang akan diganti) dan 1 gambar wajah (wajah pengganti).
+            </p>
+            <div class="upload-grid">
+                <div class="upload-zone" id="zone-video" data-type="video">
+                    <input type="file" id="input-video" accept=".mp4,.avi,.mov,.mkv,.webm">
+                    <div class="icon">🎬</div>
+                    <div>Video</div>
+                    <div class="hint">MP4, AVI, MOV, MKV, WebM</div>
+                    <div class="file-name" id="video-name"></div>
+                </div>
+                <div class="upload-zone" id="zone-face" data-type="face">
+                    <input type="file" id="input-face" accept=".jpg,.jpeg,.png,.bmp,.webp">
+                    <div class="icon">👤</div>
+                    <div>Gambar Wajah</div>
+                    <div class="hint">JPG, PNG, BMP, WebP</div>
+                    <div class="file-name" id="face-name"></div>
+                </div>
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-primary" id="btn-process" disabled>
+                    Mulai Processing
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="card hidden" id="progress-card">
+            <div class="card-title">Progress</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="progress-text" id="progress-text">Menunggu...</div>
+        </div>
+
+        <!-- Result -->
+        <div class="card hidden" id="result-card">
+            <div class="card-title">Hasil</div>
+            <div id="result-message" class="message"></div>
+            <div class="download-section mt-1 hidden" id="download-section">
+                <a class="btn btn-primary" id="btn-download" href="#" download>Download Video</a>
+                <button class="btn btn-secondary" id="btn-reset">Proses Baru</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const zoneVideo = document.getElementById('zone-video');
+        const zoneFace = document.getElementById('zone-face');
+        const inputVideo = document.getElementById('input-video');
+        const inputFace = document.getElementById('input-face');
+        const videoName = document.getElementById('video-name');
+        const faceName = document.getElementById('face-name');
+        const btnLoadModel = document.getElementById('btn-load-model');
+        const btnProcess = document.getElementById('btn-process');
+        const btnDownload = document.getElementById('btn-download');
+        const btnReset = document.getElementById('btn-reset');
+        const modelStatus = document.getElementById('model-status');
+        const progressCard = document.getElementById('progress-card');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const resultCard = document.getElementById('result-card');
+        const resultMessage = document.getElementById('result-message');
+        const downloadSection = document.getElementById('download-section');
+        const step1Badge = document.getElementById('step1-badge');
+        const step2Badge = document.getElementById('step2-badge');
+        const gpuOption = document.getElementById('gpu-option');
+
+        let currentJobId = null;
+
+        // Check GPU availability
+        fetch('/api/check-gpu')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.has_gpu) {
+                    gpuOption.style.opacity = '0.5';
+                    gpuOption.title = 'GPU tidak tersedia';
+                }
+            });
+
+        // Check if model already loaded
+        function checkModel() {
+            fetch('/api/check-model')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.loaded) {
+                        modelStatus.textContent = '✓ Model sudah dimuat';
+                        modelStatus.className = 'message success';
+                        modelStatus.classList.remove('hidden');
+                        step1Badge.textContent = 'Done';
+                        step1Badge.classList.add('done');
+                        btnProcess.disabled = false;
+                    }
+                });
+        }
+        checkModel();
+
+        // Load model
+        btnLoadModel.addEventListener('click', async () => {
+            const useGpu = document.querySelector('input[name="device"]:checked').value === 'gpu';
+            btnLoadModel.disabled = true;
+            btnLoadModel.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px"></span> Loading...';
+
+            try {
+                const res = await fetch('/api/load-model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ use_gpu: useGpu })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    modelStatus.textContent = '✓ ' + data.message;
+                    modelStatus.className = 'message success';
+                    step1Badge.textContent = 'Done';
+                    step1Badge.classList.add('done');
+                    btnProcess.disabled = false;
+                } else {
+                    modelStatus.textContent = '✗ ' + data.message;
+                    modelStatus.className = 'message error';
+                }
+                modelStatus.classList.remove('hidden');
+            } catch (e) {
+                modelStatus.textContent = '✗ Error: ' + e.message;
+                modelStatus.className = 'message error';
+                modelStatus.classList.remove('hidden');
+            }
+            btnLoadModel.disabled = false;
+            btnLoadModel.textContent = 'Load Model';
+        });
+
+        // Upload zones
+        [zoneVideo, zoneFace].forEach(zone => {
+            const input = zone.querySelector('input');
+            const nameEl = zone.querySelector('.file-name');
+
+            zone.addEventListener('click', () => input.click());
+            zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    input.files = e.dataTransfer.files;
+                    nameEl.textContent = e.dataTransfer.files[0].name;
+                }
+            });
+            input.addEventListener('change', () => {
+                nameEl.textContent = input.files.length ? input.files[0].name : '';
+            });
+        });
+
+        // Process
+        btnProcess.addEventListener('click', async () => {
+            if (!inputVideo.files.length || !inputFace.files.length) {
+                alert('Pilih video dan gambar wajah terlebih dahulu');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', inputVideo.files[0]);
+            formData.append('face_image', inputFace.files[0]);
+
+            btnProcess.disabled = true;
+            progressCard.classList.remove('hidden');
+            resultCard.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/process', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (!data.success) {
+                    throw new Error(data.message || 'Gagal memulai processing');
+                }
+
+                currentJobId = data.job_id;
+                pollProgress();
+            } catch (e) {
+                progressCard.classList.add('hidden');
+                resultCard.classList.remove('hidden');
+                resultMessage.textContent = e.message;
+                resultMessage.className = 'message error';
+                btnProcess.disabled = false;
+            }
+        });
+
+        function pollProgress() {
+            if (!currentJobId) return;
+
+            fetch(`/api/progress/${currentJobId}`)
+                .then(r => r.json())
+                .then(data => {
+                    progressFill.style.width = data.percent + '%';
+                    progressText.textContent = data.message;
+
+                    if (data.done) {
+                        progressCard.classList.add('hidden');
+                        resultCard.classList.remove('hidden');
+
+                        if (data.success === true) {
+                            resultMessage.textContent = '✓ ' + data.message;
+                            resultMessage.className = 'message success';
+                            downloadSection.classList.remove('hidden');
+                            btnDownload.href = `/api/download/${currentJobId}`;
+                        } else {
+                            resultMessage.textContent = '✗ ' + (data.message || 'Processing gagal');
+                            resultMessage.className = 'message error';
+                            downloadSection.classList.add('hidden');
+                        }
+                        btnProcess.disabled = false;
+                        return;
+                    }
+
+                    setTimeout(pollProgress, 500);
+                })
+                .catch(() => setTimeout(pollProgress, 1000));
+        }
+
+        btnReset.addEventListener('click', () => {
+            resultCard.classList.add('hidden');
+            downloadSection.classList.add('hidden');
+            inputVideo.value = '';
+            inputFace.value = '';
+            videoName.textContent = '';
+            faceName.textContent = '';
+            currentJobId = null;
+        });
+    </script>
+</body>
+</html>
