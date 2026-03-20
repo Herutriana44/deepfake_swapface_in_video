@@ -1,9 +1,13 @@
 """
 Face swap module using InsightFace.
 Swaps faces in video frames with a face from a source image.
+Preserves original video audio in output.
 """
 
 import os
+import shutil
+import subprocess
+import tempfile
 import cv2
 import numpy as np
 from typing import Optional, Callable, Tuple
@@ -126,6 +130,47 @@ def load_models(use_gpu: bool, progress_callback: Optional[Callable] = None) -> 
             return False, str(e)
 
 
+def _has_audio_stream(video_path: str) -> bool:
+    """Cek apakah video memiliki stream audio."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                video_path
+            ],
+            capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0 and "audio" in (result.stdout or "")
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> bool:
+    """
+    Gabungkan video (tanpa audio) dengan audio dari video asli.
+    Returns True jika berhasil.
+    """
+    if not _has_audio_stream(original_video):
+        return False
+    try:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_no_audio,
+            "-i", original_video,
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-shortest",
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return False
+
+
 def get_face(face_analyser, frame: np.ndarray):
     """Get the first/main face from frame."""
     faces = face_analyser.get(frame)
@@ -191,27 +236,45 @@ def process_video(
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        # Video writer
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        
-        frame_idx = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        # Tulis ke file sementara (video saja, tanpa audio)
+        fd, temp_video_path = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(temp_video_path, fourcc, fps, (width, height))
             
-            if progress_callback:
-                progress_callback(frame_idx, total_frames, f"Memproses frame {frame_idx + 1}/{total_frames}")
+            frame_idx = 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                if progress_callback:
+                    progress_callback(frame_idx, total_frames, f"Memproses frame {frame_idx + 1}/{total_frames}")
+                
+                result_frame = swap_face_in_frame(
+                    frame, source_face, _face_analyser, _face_swapper, progress_callback
+                )
+                out.write(result_frame)
+                frame_idx += 1
             
-            result_frame = swap_face_in_frame(
-                frame, source_face, _face_analyser, _face_swapper, progress_callback
-            )
-            out.write(result_frame)
-            frame_idx += 1
-        
-        cap.release()
-        out.release()
+            cap.release()
+            out.release()
+            
+            # Gabungkan dengan audio dari video asli
+            if _has_audio_stream(video_path):
+                if progress_callback:
+                    progress_callback(frame_idx, total_frames, "Menggabungkan audio...")
+                if _merge_audio(temp_video_path, video_path, output_path):
+                    pass  # output_path sudah berisi video+audio
+                else:
+                    # Fallback: copy video tanpa audio
+                    shutil.copy(temp_video_path, output_path)
+            else:
+                shutil.copy(temp_video_path, output_path)
+        finally:
+            if os.path.exists(temp_video_path):
+                os.remove(temp_video_path)
         
         if progress_callback:
             progress_callback(total_frames, total_frames, "Selesai!")

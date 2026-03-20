@@ -4,6 +4,7 @@ Aplikasi web Flask untuk mengganti wajah di video dengan wajah dari gambar mengg
 
 ## Fitur
 
+- Audio video asli tetap tersimpan di output
 - Pilih CPU atau GPU untuk processing
 - Load model sebelum processing
 - Upload 1 video + 1 gambar wajah
@@ -56,6 +57,10 @@ Buka http://localhost:5000 di browser.
 # Cell 2: Run (dengan ngrok untuk akses dari browser)
 !python run_colab.py --ngrok
 ```
+
+## Dependencies
+
+- **ffmpeg**: Diperlukan untuk menyimpan audio. Biasanya sudah terpasang di Colab/Kaggle. Lokal: `sudo apt install ffmpeg` (Linux) atau download dari ffmpeg.org.
 
 ## Model
 
