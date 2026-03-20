@@ -386,14 +386,17 @@ def process_video(
                 merge_ok, merge_err = _merge_audio(temp_video_path, video_path, output_path)
                 if merge_ok:
                     _log("Output dengan audio tersimpan")
+                    merge_error_msg = None
                 else:
                     _log(f"Merge gagal: {merge_err}", "WARNING")
                     _log("Fallback: menyimpan video tanpa audio", "WARNING")
                     shutil.copy(temp_video_path, output_path)
                     _log("Video tanpa audio berhasil disimpan")
+                    merge_error_msg = merge_err
             else:
                 _log("Video sumber tidak punya audio, menyimpan tanpa suara")
                 shutil.copy(temp_video_path, output_path)
+                merge_error_msg = None
         finally:
             if os.path.exists(temp_video_path):
                 try:
@@ -405,6 +408,8 @@ def process_video(
             progress_callback(total_frames, total_frames, "Selesai!")
 
         msg = f"Video berhasil diproses ({frame_idx} frame)"
+        if merge_error_msg:
+            msg += f". Tanpa audio: {merge_error_msg}"
         _log(msg)
         return True, msg
 

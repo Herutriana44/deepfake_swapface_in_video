@@ -176,7 +176,7 @@ def api_process():
                 progress_state[job_id]["current"] = current
                 progress_state[job_id]["total"] = total
                 progress_state[job_id]["message"] = msg
-                progress_state[job_id]["done"] = current >= total and total > 0
+                # Jangan set done di sini - done hanya di-set saat run_process selesai
 
     def run_process():
         set_log_handler(log_cb)
@@ -184,6 +184,10 @@ def api_process():
             success, message = process_video(
                 video_path, face_path, output_path, progress_callback=progress_cb
             )
+        except Exception as e:
+            import traceback
+            log_cb(f"[ERROR] {traceback.format_exc()}")
+            success, message = False, f"{type(e).__name__}: {str(e)}"
         finally:
             set_log_handler(None)
         with progress_lock:
