@@ -21,14 +21,24 @@ def is_model_loaded() -> bool:
     return _face_analyser is not None and _face_swapper is not None
 
 
-def get_providers(use_gpu: bool) -> list:
-    """Get ONNX runtime providers based on device selection."""
+def get_providers(use_gpu: bool) -> tuple:
+    """
+    Get ONNX runtime providers based on device selection.
+    Returns (providers_list, error_message or None).
+    """
     import onnxruntime as ort
     available = ort.get_available_providers()
     
-    if use_gpu and "CUDAExecutionProvider" in available:
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    return ["CPUExecutionProvider"]
+    if use_gpu:
+        if "CUDAExecutionProvider" in available:
+            return (["CUDAExecutionProvider", "CPUExecutionProvider"], None)
+        # GPU dipilih tapi onnxruntime tidak punya CUDA - perlu onnxruntime-gpu
+        return (
+            ["CPUExecutionProvider"],
+            "GPU dipilih tapi ONNX Runtime tidak mendukung CUDA. "
+            "Install onnxruntime-gpu: pip uninstall onnxruntime -y && pip install onnxruntime-gpu"
+        )
+    return (["CPUExecutionProvider"], None)
 
 
 def load_models(use_gpu: bool, progress_callback: Optional[Callable] = None) -> Tuple[bool, str]:
@@ -39,7 +49,9 @@ def load_models(use_gpu: bool, progress_callback: Optional[Callable] = None) -> 
     global _face_analyser, _face_swapper, _current_providers
     
     with _models_lock:
-        providers = get_providers(use_gpu)
+        providers, provider_error = get_providers(use_gpu)
+        if provider_error:
+            return False, provider_error
         
         # Skip if already loaded with same providers
         if _face_analyser is not None and _current_providers == tuple(providers):

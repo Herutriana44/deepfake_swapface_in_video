@@ -316,8 +316,11 @@
                 </label>
                 <label class="radio-option" id="gpu-option">
                     <input type="radio" name="device" value="gpu">
-                    <span>GPU (CUDA)</span>
+                    <span id="gpu-label">GPU (CUDA)</span>
                 </label>
+            </div>
+            <div id="gpu-onnx-warning" class="message" style="margin-top: 0.75rem; display: none; background: rgba(210, 153, 34, 0.15); border-color: rgba(210, 153, 34, 0.3); color: var(--warning);">
+                GPU terdeteksi. Untuk menggunakan GPU, install: <code>pip uninstall onnxruntime -y && pip install onnxruntime-gpu</code>
             </div>
             <div class="mt-1">
                 <button class="btn btn-primary" id="btn-load-model">
@@ -400,14 +403,23 @@
         const step1Badge = document.getElementById('step1-badge');
         const step2Badge = document.getElementById('step2-badge');
         const gpuOption = document.getElementById('gpu-option');
+        const gpuLabel = document.getElementById('gpu-label');
+        const gpuOnnxWarning = document.getElementById('gpu-onnx-warning');
 
         let currentJobId = null;
 
-        // Check GPU availability
+        // Check GPU availability (multi-source: PyTorch, nvidia-smi, onnxruntime)
         fetch('/api/check-gpu')
             .then(r => r.json())
             .then(data => {
-                if (!data.has_gpu) {
+                if (data.has_gpu) {
+                    gpuOption.style.opacity = '1';
+                    gpuLabel.textContent = data.gpu_name ? 'GPU (' + data.gpu_name + ')' : 'GPU (CUDA)';
+                    gpuOption.title = 'GPU terdeteksi: ' + (data.gpu_name || 'CUDA');
+                    if (data.has_gpu && !data.has_onnx_cuda) {
+                        gpuOnnxWarning.style.display = 'block';
+                    }
+                } else {
                     gpuOption.style.opacity = '0.5';
                     gpuOption.title = 'GPU tidak tersedia';
                 }

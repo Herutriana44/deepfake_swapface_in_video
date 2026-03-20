@@ -51,16 +51,78 @@ def api_check_model():
     return jsonify({"loaded": is_model_loaded()})
 
 
-@app.route("/api/check-gpu", methods=["GET"])
-def api_check_gpu():
-    """Cek ketersediaan GPU."""
+def _detect_gpu_system() -> dict:
+    """
+    Deteksi GPU dari berbagai sumber (Kaggle/Colab bisa punya GPU
+    meski onnxruntime CPU terpasang). Return dict dengan info deteksi.
+    """
+    result = {
+        "has_gpu": False,
+        "has_onnx_cuda": False,
+        "providers": [],
+        "gpu_name": None,
+        "detection_method": None,
+    }
+    
+    # 1. Cek via PyTorch (paling reliable di Kaggle/Colab)
+    try:
+        import torch
+        if torch.cuda.is_available():
+            result["has_gpu"] = True
+            result["gpu_name"] = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "CUDA"
+            result["detection_method"] = "pytorch"
+    except ImportError:
+        pass
+    
+    # 2. Cek via nvidia-smi (jika PyTorch tidak terpasang)
+    if not result["has_gpu"]:
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                result["has_gpu"] = True
+                result["gpu_name"] = out.stdout.strip().split("\n")[0]
+                result["detection_method"] = "nvidia-smi"
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+    
+    # 3. Cek env var (Kaggle/Colab set ini saat GPU aktif)
+    if not result["has_gpu"]:
+        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if cuda_visible and cuda_visible != "-1" and cuda_visible != "":
+            result["has_gpu"] = True
+            result["detection_method"] = "env"
+    
+    # 4. Cek ONNX Runtime providers
     try:
         import onnxruntime as ort
-        providers = ort.get_available_providers()
-        has_gpu = "CUDAExecutionProvider" in providers
-        return jsonify({"has_gpu": has_gpu, "providers": providers})
+        result["providers"] = ort.get_available_providers()
+        result["has_onnx_cuda"] = "CUDAExecutionProvider" in result["providers"]
+        # Jika sistem punya GPU tapi onnx belum, tetap tampilkan has_gpu=True
+        # (user perlu install onnxruntime-gpu)
+    except Exception:
+        pass
+    
+    return result
+
+
+@app.route("/api/check-gpu", methods=["GET"])
+def api_check_gpu():
+    """Cek ketersediaan GPU (multi-source: PyTorch, nvidia-smi, env, onnxruntime)."""
+    try:
+        info = _detect_gpu_system()
+        return jsonify({
+            "has_gpu": info["has_gpu"],
+            "has_onnx_cuda": info["has_onnx_cuda"],
+            "providers": info["providers"],
+            "gpu_name": info["gpu_name"],
+            "detection_method": info["detection_method"],
+        })
     except Exception as e:
-        return jsonify({"has_gpu": False, "error": str(e)})
+        return jsonify({"has_gpu": False, "has_onnx_cuda": False, "error": str(e)})
 
 
 @app.route("/api/process", methods=["POST"])
