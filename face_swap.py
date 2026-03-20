@@ -155,6 +155,7 @@ def load_models(use_gpu: bool, progress_callback: Optional[Callable] = None) -> 
 
 def _has_audio_stream(video_path: str) -> bool:
     """Cek apakah video memiliki stream audio."""
+    _log(f"ffprobe: cek audio di {os.path.basename(video_path)}")
     try:
         result = subprocess.run(
             [
@@ -164,8 +165,9 @@ def _has_audio_stream(video_path: str) -> bool:
             ],
             capture_output=True, text=True, timeout=10
         )
+        _log(f"ffprobe returncode={result.returncode}, stdout='{result.stdout or ''}', stderr='{result.stderr or ''}'")
         has_audio = result.returncode == 0 and result.stdout and "audio" in result.stdout
-        _log(f"Cek audio stream: {'ada' if has_audio else 'tidak ada'}")
+        _log(f"Audio stream: {'ada' if has_audio else 'tidak ada'}")
         return has_audio
     except FileNotFoundError:
         _log("ffprobe tidak ditemukan - asumsikan tidak ada audio", "WARNING")
@@ -180,11 +182,30 @@ def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> 
     Gabungkan video (tanpa audio) dengan audio dari video asli.
     Returns (success, error_message).
     """
-    if not _has_audio_stream(original_video):
-        return False, "Video sumber tidak memiliki audio"
+    _log("=== Mulai penggabungan audio ===")
+    _log(f"Video (tanpa audio): {video_no_audio}, exists={os.path.exists(video_no_audio)}, size={os.path.getsize(video_no_audio) if os.path.exists(video_no_audio) else 0} bytes")
+    _log(f"Original (dengan audio): {original_video}, exists={os.path.exists(original_video)}, size={os.path.getsize(original_video) if os.path.exists(original_video) else 0} bytes")
+    _log(f"Output: {output_path}")
+
+    # Cek ffmpeg tersedia
     try:
-        # Coba copy dulu (cepat), fallback ke re-encode (lebih kompatibel)
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
+        _log("ffmpeg tersedia")
+    except FileNotFoundError:
+        _log("ffmpeg tidak ditemukan di PATH", "ERROR")
+        return False, "ffmpeg tidak ditemukan. Install: apt install ffmpeg"
+    except Exception as e:
+        _log(f"Cek ffmpeg: {e}", "WARNING")
+
+    if not _has_audio_stream(original_video):
+        _log("Video sumber tidak memiliki audio - skip merge", "WARNING")
+        return False, "Video sumber tidak memiliki audio"
+
+    try:
         for use_copy in [True, False]:
+            mode = "copy" if use_copy else "re-encode"
+            _log(f"Mencoba merge audio (mode={mode})...")
+
             if use_copy:
                 cmd = [
                     "ffmpeg", "-y",
@@ -197,7 +218,6 @@ def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> 
                     "-shortest",
                     output_path
                 ]
-                _log("Menggabungkan audio (copy)...")
             else:
                 cmd = [
                     "ffmpeg", "-y",
@@ -212,24 +232,37 @@ def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> 
                     "-shortest",
                     output_path
                 ]
-                _log("Menggabungkan audio (re-encode)...")
+
+            cmd_str = " ".join(f'"{x}"' if " " in x else x for x in cmd)
+            _log(f"ffmpeg command: {cmd_str}")
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            stderr_full = result.stderr or ""
+            stdout_full = result.stdout or ""
+
             if result.returncode == 0:
                 _log("Audio berhasil digabungkan")
                 return True, ""
-            err = (result.stderr or result.stdout or "")[-500:]
-            _log(f"ffmpeg gagal: {err}", "WARNING")
+
+            _log(f"ffmpeg gagal (returncode={result.returncode})", "WARNING")
+            _log(f"ffmpeg stderr: {stderr_full}", "WARNING")
+            if stdout_full:
+                _log(f"ffmpeg stdout: {stdout_full}", "WARNING")
             if use_copy:
+                _log("Fallback ke re-encode...")
                 continue
-            return False, f"ffmpeg error: {err}"
+            return False, f"ffmpeg error: {stderr_full[-1000:] if len(stderr_full) > 1000 else stderr_full}"
+
     except FileNotFoundError:
         _log("ffmpeg tidak ditemukan", "ERROR")
         return False, "ffmpeg tidak ditemukan. Install: apt install ffmpeg"
     except subprocess.TimeoutExpired:
-        _log("ffmpeg timeout", "ERROR")
+        _log("ffmpeg timeout (600s)", "ERROR")
         return False, "ffmpeg timeout"
     except Exception as e:
         _log(f"Error merge audio: {e}", "ERROR")
+        import traceback
+        _log(traceback.format_exc(), "ERROR")
         return False, str(e)
 
 
@@ -345,17 +378,21 @@ def process_video(
             _log(f"Face swap selesai: {frame_idx} frame diproses")
 
             # Gabungkan dengan audio dari video asli
+            _log("Memeriksa audio video sumber...")
             if _has_audio_stream(video_path):
                 if progress_callback:
                     progress_callback(frame_idx, total_frames, "Menggabungkan audio...")
+                _log("Memanggil _merge_audio...")
                 merge_ok, merge_err = _merge_audio(temp_video_path, video_path, output_path)
                 if merge_ok:
                     _log("Output dengan audio tersimpan")
                 else:
-                    _log(f"Fallback: video tanpa audio ({merge_err})", "WARNING")
+                    _log(f"Merge gagal: {merge_err}", "WARNING")
+                    _log("Fallback: menyimpan video tanpa audio", "WARNING")
                     shutil.copy(temp_video_path, output_path)
+                    _log("Video tanpa audio berhasil disimpan")
             else:
-                _log("Video sumber tidak punya audio, output tanpa suara")
+                _log("Video sumber tidak punya audio, menyimpan tanpa suara")
                 shutil.copy(temp_video_path, output_path)
         finally:
             if os.path.exists(temp_video_path):
