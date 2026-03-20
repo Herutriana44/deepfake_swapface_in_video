@@ -4,6 +4,7 @@ Swaps faces in video frames with a face from a source image.
 Preserves original video audio in output.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -12,6 +13,28 @@ import cv2
 import numpy as np
 from typing import Optional, Callable, Tuple
 import threading
+
+# Logger - bisa di-set dari luar untuk mengumpulkan log
+_log_handler: Optional[Callable[[str], None]] = None
+
+
+def set_log_handler(handler: Optional[Callable[[str], None]]):
+    """Set handler untuk mengumpulkan log (dipanggil dari app)."""
+    global _log_handler
+    _log_handler = handler
+
+
+def _log(msg: str, level: str = "INFO"):
+    """Tulis log ke handler dan logging."""
+    logging.getLogger("face_swap").log(
+        getattr(logging, level.upper(), logging.INFO), msg
+    )
+    if _log_handler:
+        try:
+            _log_handler(f"[{level}] {msg}")
+        except Exception:
+            pass
+
 
 # Global state for models (loaded per device)
 _face_analyser = None
@@ -141,34 +164,73 @@ def _has_audio_stream(video_path: str) -> bool:
             ],
             capture_output=True, text=True, timeout=10
         )
-        return result.returncode == 0 and "audio" in (result.stdout or "")
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        has_audio = result.returncode == 0 and result.stdout and "audio" in result.stdout
+        _log(f"Cek audio stream: {'ada' if has_audio else 'tidak ada'}")
+        return has_audio
+    except FileNotFoundError:
+        _log("ffprobe tidak ditemukan - asumsikan tidak ada audio", "WARNING")
+        return False
+    except Exception as e:
+        _log(f"Error cek audio: {e}", "WARNING")
         return False
 
 
-def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> bool:
+def _merge_audio(video_no_audio: str, original_video: str, output_path: str) -> Tuple[bool, str]:
     """
     Gabungkan video (tanpa audio) dengan audio dari video asli.
-    Returns True jika berhasil.
+    Returns (success, error_message).
     """
     if not _has_audio_stream(original_video):
-        return False
+        return False, "Video sumber tidak memiliki audio"
     try:
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_no_audio,
-            "-i", original_video,
-            "-map", "0:v",
-            "-map", "1:a",
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-shortest",
-            output_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        return False
+        # Coba copy dulu (cepat), fallback ke re-encode (lebih kompatibel)
+        for use_copy in [True, False]:
+            if use_copy:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", video_no_audio,
+                    "-i", original_video,
+                    "-map", "0:v",
+                    "-map", "1:a",
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-shortest",
+                    output_path
+                ]
+                _log("Menggabungkan audio (copy)...")
+            else:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", video_no_audio,
+                    "-i", original_video,
+                    "-map", "0:v",
+                    "-map", "1:a",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-shortest",
+                    output_path
+                ]
+                _log("Menggabungkan audio (re-encode)...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode == 0:
+                _log("Audio berhasil digabungkan")
+                return True, ""
+            err = (result.stderr or result.stdout or "")[-500:]
+            _log(f"ffmpeg gagal: {err}", "WARNING")
+            if use_copy:
+                continue
+            return False, f"ffmpeg error: {err}"
+    except FileNotFoundError:
+        _log("ffmpeg tidak ditemukan", "ERROR")
+        return False, "ffmpeg tidak ditemukan. Install: apt install ffmpeg"
+    except subprocess.TimeoutExpired:
+        _log("ffmpeg timeout", "ERROR")
+        return False, "ffmpeg timeout"
+    except Exception as e:
+        _log(f"Error merge audio: {e}", "ERROR")
+        return False, str(e)
 
 
 def get_face(face_analyser, frame: np.ndarray):
@@ -212,74 +274,105 @@ def process_video(
     Returns (success, message).
     """
     global _face_analyser, _face_swapper
-    
+    frame_idx = 0
+
     if _face_analyser is None or _face_swapper is None:
+        _log("Model belum dimuat")
         return False, "Model belum dimuat. Pilih device dan load model terlebih dahulu."
-    
+
     try:
+        _log(f"Memulai processing: video={video_path}, face={source_image_path}")
+
         # Read source image and get face
         source_img = cv2.imread(source_image_path)
         if source_img is None:
+            _log("Gagal membaca gambar wajah sumber", "ERROR")
             return False, "Gagal membaca gambar wajah sumber"
-        
+
         source_face = get_face(_face_analyser, source_img)
         if source_face is None:
+            _log("Tidak ada wajah terdeteksi pada gambar sumber", "ERROR")
             return False, "Tidak ada wajah terdeteksi pada gambar sumber"
-        
+        _log("Wajah sumber berhasil dideteksi")
+
         # Open video
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
+            _log("Gagal membuka video", "ERROR")
             return False, "Gagal membuka video"
-        
+
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
+
+        if total_frames <= 0:
+            total_frames = 1  # Hindari division by zero
+        _log(f"Video: {width}x{height}, {fps} fps, ~{total_frames} frame")
+
         # Tulis ke file sementara (video saja, tanpa audio)
         fd, temp_video_path = tempfile.mkstemp(suffix=".mp4")
         os.close(fd)
+        _log(f"Temp file: {temp_video_path}")
+
         try:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(temp_video_path, fourcc, fps, (width, height))
-            
+            if not out.isOpened():
+                _log("Gagal membuat VideoWriter", "ERROR")
+                return False, "Gagal membuat output video"
+
             frame_idx = 0
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                
+
                 if progress_callback:
                     progress_callback(frame_idx, total_frames, f"Memproses frame {frame_idx + 1}/{total_frames}")
-                
+
                 result_frame = swap_face_in_frame(
                     frame, source_face, _face_analyser, _face_swapper, progress_callback
                 )
                 out.write(result_frame)
                 frame_idx += 1
-            
+
+                if frame_idx % 30 == 0:
+                    _log(f"Frame {frame_idx}/{total_frames} selesai")
+
             cap.release()
             out.release()
-            
+            _log(f"Face swap selesai: {frame_idx} frame diproses")
+
             # Gabungkan dengan audio dari video asli
             if _has_audio_stream(video_path):
                 if progress_callback:
                     progress_callback(frame_idx, total_frames, "Menggabungkan audio...")
-                if _merge_audio(temp_video_path, video_path, output_path):
-                    pass  # output_path sudah berisi video+audio
+                merge_ok, merge_err = _merge_audio(temp_video_path, video_path, output_path)
+                if merge_ok:
+                    _log("Output dengan audio tersimpan")
                 else:
-                    # Fallback: copy video tanpa audio
+                    _log(f"Fallback: video tanpa audio ({merge_err})", "WARNING")
                     shutil.copy(temp_video_path, output_path)
             else:
+                _log("Video sumber tidak punya audio, output tanpa suara")
                 shutil.copy(temp_video_path, output_path)
         finally:
             if os.path.exists(temp_video_path):
-                os.remove(temp_video_path)
-        
+                try:
+                    os.remove(temp_video_path)
+                except OSError as e:
+                    _log(f"Gagal hapus temp: {e}", "WARNING")
+
         if progress_callback:
             progress_callback(total_frames, total_frames, "Selesai!")
-        
-        return True, f"Video berhasil diproses ({frame_idx} frame)"
-        
+
+        msg = f"Video berhasil diproses ({frame_idx} frame)"
+        _log(msg)
+        return True, msg
+
     except Exception as e:
+        _log(f"Error: {e}", "ERROR")
+        import traceback
+        _log(traceback.format_exc(), "ERROR")
         return False, str(e)

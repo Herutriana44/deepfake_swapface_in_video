@@ -8,7 +8,7 @@ import uuid
 import threading
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-from face_swap import load_models, process_video, get_providers, is_model_loaded
+from face_swap import load_models, process_video, is_model_loaded, set_log_handler
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB max
@@ -158,9 +158,17 @@ def api_process():
     video_file.save(video_path)
     face_file.save(face_path)
 
-    # Initialize progress
+    # Initialize progress + logs
     with progress_lock:
-        progress_state[job_id] = {"current": 0, "total": 1, "message": "Memulai...", "done": False}
+        progress_state[job_id] = {
+            "current": 0, "total": 1, "message": "Memulai...", "done": False,
+            "logs": []
+        }
+
+    def log_cb(log_line: str):
+        with progress_lock:
+            if job_id in progress_state:
+                progress_state[job_id].setdefault("logs", []).append(log_line)
 
     def progress_cb(current, total, msg):
         with progress_lock:
@@ -171,9 +179,13 @@ def api_process():
                 progress_state[job_id]["done"] = current >= total and total > 0
 
     def run_process():
-        success, message = process_video(
-            video_path, face_path, output_path, progress_callback=progress_cb
-        )
+        set_log_handler(log_cb)
+        try:
+            success, message = process_video(
+                video_path, face_path, output_path, progress_callback=progress_cb
+            )
+        finally:
+            set_log_handler(None)
         with progress_lock:
             if job_id in progress_state:
                 progress_state[job_id]["success"] = success
@@ -195,7 +207,7 @@ def api_process():
 
 @app.route("/api/progress/<job_id>")
 def api_progress(job_id):
-    """Ambil progress processing."""
+    """Ambil progress processing + logs."""
     with progress_lock:
         if job_id not in progress_state:
             return jsonify({"error": "Job tidak ditemukan"}), 404
@@ -212,6 +224,7 @@ def api_progress(job_id):
         "message": state["message"],
         "done": state.get("done", False),
         "success": state.get("success", None),
+        "logs": state.get("logs", []),
     })
 
 

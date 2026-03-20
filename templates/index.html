@@ -291,6 +291,30 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        .log-panel {
+            margin-top: 1rem;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-title {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .log-panel pre {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -369,6 +393,10 @@
                 <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
             </div>
             <div class="progress-text" id="progress-text">Menunggu...</div>
+            <div class="log-panel" id="log-panel">
+                <div class="log-title">Log Processing</div>
+                <pre id="log-content"></pre>
+            </div>
         </div>
 
         <!-- Result -->
@@ -405,6 +433,7 @@
         const gpuOption = document.getElementById('gpu-option');
         const gpuLabel = document.getElementById('gpu-label');
         const gpuOnnxWarning = document.getElementById('gpu-onnx-warning');
+        const logContent = document.getElementById('log-content');
 
         let currentJobId = null;
 
@@ -511,6 +540,7 @@
             btnProcess.disabled = true;
             progressCard.classList.remove('hidden');
             resultCard.classList.add('hidden');
+            logContent.textContent = '';
 
             try {
                 const res = await fetch('/api/process', {
@@ -542,6 +572,10 @@
                 .then(data => {
                     progressFill.style.width = data.percent + '%';
                     progressText.textContent = data.message;
+                    if (data.logs && data.logs.length) {
+                        logContent.textContent = data.logs.join('\n');
+                        logContent.parentElement.scrollTop = logContent.parentElement.scrollHeight;
+                    }
 
                     if (data.done) {
                         progressCard.classList.add('hidden');
